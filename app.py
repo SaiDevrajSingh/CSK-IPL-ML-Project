@@ -388,8 +388,7 @@ def main():
             st.session_state.model_loaded = loaded
             
             if loaded and pipeline.model_loaded:
-                st.success("✅ Real Random Forest model loaded - Authentic predictions with 61.5% accuracy")
-                st.info("🎯 Using trained ML model on 252 historical CSK matches")
+                st.success("Real Random Forest model loaded - Authentic predictions with 61.5% accuracy")
             else:
                 st.error("❌ ML model failed to load. Please check model files.")
                 st.stop()
