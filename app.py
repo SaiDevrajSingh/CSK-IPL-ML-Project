@@ -368,6 +368,8 @@ def load_prediction_model():
     if not model_loaded:
         st.error("❌ Failed to load ML model. Cannot proceed without trained model.")
         return None, False
+    
+    return pipeline, model_loaded
 
 def main():
     # Header
@@ -376,20 +378,24 @@ def main():
     
     # Load model (only once)
     if not st.session_state.model_loaded:
-        pipeline, loaded = load_prediction_model()
-        st.session_state.prediction_pipeline = pipeline
-        st.session_state.model_loaded = loaded
-        
-        if loaded:
-            # Check if real model is loaded
-            if pipeline.model_loaded:
-                st.success(" Real Random Forest model loaded - Authentic predictions with 61.5% accuracy")
-                st.info(" Using trained ML model on 252 historical CSK matches")
+        try:
+            pipeline, loaded = load_prediction_model()
+            if pipeline is None or not loaded:
+                st.error("❌ Failed to load any prediction model")
+                st.stop()
+                
+            st.session_state.prediction_pipeline = pipeline
+            st.session_state.model_loaded = loaded
+            
+            if loaded and pipeline.model_loaded:
+                st.success("✅ Real Random Forest model loaded - Authentic predictions with 61.5% accuracy")
+                st.info("🎯 Using trained ML model on 252 historical CSK matches")
             else:
-                st.error(" ML model failed to load. Please check model files.")
-        else:
-            st.error(" Failed to load any prediction model")
-            return
+                st.error("❌ ML model failed to load. Please check model files.")
+                st.stop()
+        except Exception as e:
+            st.error(f"❌ Error loading model: {str(e)}")
+            st.stop()
     
     # Sidebar for inputs
     st.sidebar.header("Match Configuration")
