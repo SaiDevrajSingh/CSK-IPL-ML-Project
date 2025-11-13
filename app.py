@@ -359,7 +359,7 @@ def load_prediction_model():
         try:
             pipeline = CSKPredictor(model_path)
             if pipeline.model_loaded:
-                st.success(f"✅ Real Random Forest model loaded from {model_path}")
+                st.success(f"Real Random Forest model loaded from {model_path}")
                 model_loaded = True
                 break
         except Exception as e:
@@ -388,7 +388,7 @@ def main():
             st.session_state.model_loaded = loaded
             
             if loaded and pipeline.model_loaded:
-                st.success("Real Random Forest model loaded - Authentic predictions with 61.5% accuracy")
+                st.success("Predictions with 61.5% accuracy")
             else:
                 st.error("❌ ML model failed to load. Please check model files.")
                 st.stop()
