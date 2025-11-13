@@ -67,8 +67,7 @@ class CSKPredictor:
         import os
         from pathlib import Path
         
-        # Initialize fallback first
-        self._use_fallback = True
+        # Initialize model components
         self.model = None
         self.venue_encoder = None
         self.opponent_encoder = None
@@ -76,6 +75,7 @@ class CSKPredictor:
         self.toss_winner_encoder = None
         self.toss_decision_encoder = None
         self.feature_names = None
+        self.model_loaded = False
         
         # Get current script directory for relative paths
         try:
@@ -133,7 +133,7 @@ class CSKPredictor:
                     try:
                         test_features = [0] * 5  # 5 dummy features (venue, opponent, city, toss_winner, toss_decision)
                         _ = self.model.predict_proba([test_features])
-                        self._use_fallback = False
+                        self.model_loaded = True
                         print(f"✅ Real ML model loaded and verified from {path}")
                         break
                     except Exception as test_e:
@@ -143,39 +143,8 @@ class CSKPredictor:
                 print(f"Failed to load from {path}: {e}")
                 continue
         
-        if self._use_fallback:
-            print("⚠️ Could not load real model files - using fallback")
-            print(f"Searched paths: {[str(p) for p in possible_paths[:5]]}...")  # Show first 5 paths
-            # Try to list what's actually in the deployment directory
-            try:
-                import os
-                deployment_paths = ["/mount/src/mlproject", "/mount/src/mlproject/dashboards"]
-                for dp in deployment_paths:
-                    if os.path.exists(dp):
-                        files = os.listdir(dp)
-                        pkl_files = [f for f in files if f.endswith('.pkl')]
-                        print(f"Files in {dp}: {pkl_files}")
-            except:
-                pass
-            self._init_fallback()
-    
-    def _init_fallback(self):
-        """Initialize fallback rule-based system"""
-        self.base_win_rate = 0.58
-        self.factors = {
-            'home_advantage': 0.18,
-            'toss_advantage': 0.12,
-            'bat_first_advantage': 0.06,
-            'peak_season': 0.08,
-            'strong_opponent': -0.15,
-            'playoff_pressure': -0.06,
-            'early_season': 0.04,
-            'late_season': -0.05,
-            'weekend_match': 0.03,
-            'momentum_factor': 0.10,
-            'captain_factor': 0.07,
-            'pitch_conditions': 0.05
-        }
+        if not self.model_loaded:
+            raise Exception("❌ Could not load ML model files. Please ensure model files are available in models/artifacts/")
         
         # Enhanced team strength rankings with recent form analysis
         self.team_strength = {
@@ -217,14 +186,12 @@ class CSKPredictor:
         }
     
     def get_prediction_explanation(self, match_data):
-        """Generate prediction using real ML model or fallback"""
+        """Generate prediction using trained ML model"""
         
-        # Try to use real ML model first
-        if not self._use_fallback and hasattr(self, 'model') and self.model is not None:
-            return self._predict_with_ml_model(match_data)
-        else:
-            # Use fallback rule-based system
-            return self._predict_with_fallback(match_data)
+        if not self.model_loaded:
+            raise Exception("❌ ML model not loaded. Cannot make predictions.")
+        
+        return self._predict_with_ml_model(match_data)
     
     def _predict_with_ml_model(self, match_data):
         """Use the real trained Random Forest model for prediction"""
@@ -266,10 +233,7 @@ class CSKPredictor:
             
         except Exception as e:
             print(f"ML model prediction failed: {e}")
-            # Initialize fallback if not already done
-            if not hasattr(self, 'base_win_rate'):
-                self._init_fallback()
-            return self._predict_with_fallback(match_data)
+            raise Exception(f"❌ Prediction failed: {e}")
     
     def _prepare_features(self, match_data):
         """Prepare features for the ML model - exactly 5 features"""
@@ -351,157 +315,6 @@ class CSKPredictor:
         
         return factors
     
-    def _predict_with_fallback(self, match_data):
-        """Fallback rule-based prediction system"""
-        
-        # Start with base win rate
-        win_probability = self.base_win_rate
-        key_factors = {}
-        confidence_factors = []
-        
-        # Factor 1: Home Advantage
-        if self._is_home_venue(match_data.get('venue', ''), match_data.get('city', '')):
-            win_probability += self.factors['home_advantage']
-            key_factors['home_advantage'] = 'Playing at home venue (Chennai/Chepauk) - Strong crowd support'
-            confidence_factors.append('Home Advantage (+15%)')
-        
-        # Factor 2: Toss Impact
-        toss_winner = match_data.get('toss_winner', '')
-        toss_decision = match_data.get('toss_decision', '')
-        
-        if toss_winner == 'Chennai Super Kings':
-            win_probability += self.factors['toss_advantage']
-            key_factors['toss_advantage'] = 'Won the toss - Can dictate match conditions'
-            confidence_factors.append('Toss Won (+8%)')
-            
-            if toss_decision == 'bat':
-                win_probability += self.factors['bat_first_advantage']
-                key_factors['batting_first'] = 'Chose to bat first - CSK prefers setting targets'
-                confidence_factors.append('Bat First (+3%)')
-        
-        # Factor 3: Season Performance
-        season = match_data.get('season', 2025)
-        if self._is_peak_season(season):
-            win_probability += self.factors['peak_season']
-            key_factors['peak_season'] = f'Peak performance season ({season}) - Championship form expected'
-            confidence_factors.append('Peak Season (+5%)')
-        
-        # Factor 4: Enhanced Opponent Analysis
-        opponent = match_data.get('opponent', '')
-        if opponent in self.team_strength:
-            opponent_strength = self.team_strength[opponent]
-            
-            # Apply rivalry context multiplier
-            rivalry_multiplier = self.context_multipliers['rivalry_matches'].get(opponent, 1.0)
-            
-            if opponent_strength > 0.75:  # Very strong opponent
-                opponent_impact = self.factors['strong_opponent'] * 1.2  # Enhanced penalty
-                win_probability += opponent_impact
-                key_factors['very_strong_opponent'] = f'Facing top-tier opponent ({opponent}) - High difficulty match'
-                confidence_factors.append(f'Top Opponent ({opponent_impact*100:.0f}%)')
-            elif opponent_strength > 0.65:  # Strong opponent
-                opponent_impact = self.factors['strong_opponent']
-                win_probability += opponent_impact
-                key_factors['strong_opponent'] = f'Facing strong opponent ({opponent}) - Challenging match'
-                confidence_factors.append(f'Strong Opponent ({opponent_impact*100:.0f}%)')
-            elif opponent_strength < 0.62:  # Weaker opponent
-                opponent_impact = 0.12  # Increased boost against weaker teams
-                win_probability += opponent_impact
-                key_factors['favorable_opponent'] = f'Favorable matchup against {opponent}'
-                confidence_factors.append(f'Favorable Opponent (+{opponent_impact*100:.0f}%)')
-            
-            # Apply rivalry context
-            if rivalry_multiplier != 1.0:
-                rivalry_impact = (rivalry_multiplier - 1.0) * 0.5
-                win_probability += rivalry_impact
-                if rivalry_impact > 0:
-                    key_factors['rivalry_advantage'] = f'Historical advantage in {opponent} rivalry'
-                    confidence_factors.append(f'Rivalry Edge (+{rivalry_impact*100:.0f}%)')
-                else:
-                    key_factors['rivalry_challenge'] = f'Challenging rivalry against {opponent}'
-                    confidence_factors.append(f'Rivalry Challenge ({rivalry_impact*100:.0f}%)')
-        
-        # Factor 5: Match Importance
-        stage = match_data.get('stage', 'league')
-        if self._is_playoff_match(stage):
-            win_probability += self.factors['playoff_pressure']
-            key_factors['playoff_pressure'] = 'High-stakes playoff match - Pressure situation'
-            confidence_factors.append('Playoff Pressure (-4%)')
-        
-        # Factor 6: Season Timing
-        match_number = match_data.get('match_number', 8)
-        if match_number <= 4:
-            win_probability += self.factors['early_season']
-            key_factors['early_season'] = 'Early season match - Fresh team energy'
-            confidence_factors.append('Early Season (+2%)')
-        elif match_number >= 12:
-            win_probability += self.factors['late_season']
-            key_factors['late_season'] = 'Late season match - Potential fatigue factor'
-            confidence_factors.append('Late Season (-3%)')
-        
-        # Factor 7: Enhanced Venue Analysis
-        venue = match_data.get('venue', '')
-        if venue in self.venue_performance:
-            venue_factor = (self.venue_performance[venue] - 0.58) * 0.6  # Enhanced venue effect
-            win_probability += venue_factor
-            if venue_factor > 0:
-                key_factors['venue_advantage'] = f'Strong historical performance at {venue} ({self.venue_performance[venue]:.1%} win rate)'
-                confidence_factors.append(f'Venue Advantage (+{venue_factor*100:.1f}%)')
-            else:
-                key_factors['venue_challenge'] = f'Challenging venue: {venue} ({self.venue_performance[venue]:.1%} win rate)'
-                confidence_factors.append(f'Venue Challenge ({venue_factor*100:.1f}%)')
-        
-        # Factor 8: Captain Leadership Factor (Dhoni Effect)
-        if season <= 2023:  # Dhoni's active years
-            win_probability += self.factors['captain_factor']
-            key_factors['leadership_factor'] = 'MS Dhoni leadership and experience advantage'
-            confidence_factors.append('Captain Factor (+7%)')
-        
-        # Factor 9: Momentum and Form Analysis
-        # Simulate momentum based on match number and season
-        if match_number <= 6:  # Early season momentum
-            momentum_boost = self.factors['momentum_factor'] * 0.8
-            win_probability += momentum_boost
-            key_factors['early_momentum'] = 'Strong start to season - positive momentum'
-            confidence_factors.append(f'Early Momentum (+{momentum_boost*100:.0f}%)')
-        elif match_number >= 12:  # Late season experience
-            if self._is_peak_season(season):
-                momentum_boost = self.factors['momentum_factor'] * 0.6
-                win_probability += momentum_boost
-                key_factors['championship_push'] = 'Championship experience in crucial matches'
-                confidence_factors.append(f'Championship Push (+{momentum_boost*100:.0f}%)')
-        
-        # Factor 10: Pitch Conditions Suitability
-        if self._is_home_venue(venue, match_data.get('city', '')):
-            pitch_advantage = self.factors['pitch_conditions']
-            win_probability += pitch_advantage
-            key_factors['pitch_familiarity'] = 'Familiar pitch conditions and home ground advantage'
-            confidence_factors.append(f'Pitch Advantage (+{pitch_advantage*100:.0f}%)')
-        
-        # Enhanced probability bounds with better distribution
-        win_probability = max(0.20, min(0.88, win_probability))
-        
-        # Calculate confidence based on number of positive factors
-        base_confidence = max(win_probability, 1 - win_probability)
-        factor_confidence = min(0.95, base_confidence + (len(confidence_factors) * 0.02))
-        
-        # Determine prediction
-        prediction = 'WIN' if win_probability > 0.5 else 'LOSS'
-        
-        return {
-            'prediction': prediction,
-            'confidence': factor_confidence,
-            'win_probability': win_probability,
-            'loss_probability': 1 - win_probability,
-            'key_factors': key_factors,
-            'confidence_factors': confidence_factors,
-            'model_info': {
-                'model_name': 'Fallback Rule-Based Predictor',
-                'training_accuracy': 0.57,  # Realistic fallback accuracy
-                'factors_analyzed': len(confidence_factors),
-                'model_version': 'Fallback - Real Model Unavailable'
-            }
-        }
     
     def _is_home_venue(self, venue, city):
         """Check if match is at CSK's home venue"""
@@ -545,7 +358,7 @@ def load_prediction_model():
     for model_path in model_paths:
         try:
             pipeline = CSKPredictor(model_path)
-            if not pipeline._use_fallback and hasattr(pipeline, 'model') and pipeline.model is not None:
+            if pipeline.model_loaded:
                 st.success(f"✅ Real Random Forest model loaded from {model_path}")
                 model_loaded = True
                 break
@@ -553,12 +366,8 @@ def load_prediction_model():
             continue
     
     if not model_loaded:
-        # Create fallback predictor
-        pipeline = CSKPredictor()
-        st.warning("⚠️ Using fallback predictor - Real model files not accessible in deployment")
-        st.info("💡 For full accuracy, ensure model files are available in the deployment environment")
-    
-    return pipeline, True
+        st.error("❌ Failed to load ML model. Cannot proceed without trained model.")
+        return None, False
 
 def main():
     # Header
@@ -573,14 +382,13 @@ def main():
         
         if loaded:
             # Check if real model is loaded
-            if not pipeline._use_fallback and hasattr(pipeline, 'model') and pipeline.model is not None:
-                st.success("✅ Real Random Forest model loaded - Authentic predictions with 61.5% accuracy")
-                st.info("🎯 Using trained ML model on 252 historical CSK matches")
+            if pipeline.model_loaded:
+                st.success(" Real Random Forest model loaded - Authentic predictions with 61.5% accuracy")
+                st.info(" Using trained ML model on 252 historical CSK matches")
             else:
-                st.warning("⚠️ Using fallback rule-based predictor - Real model files not accessible")
-                st.info("📊 Fallback accuracy: ~57% (Rule-based predictions)")
+                st.error(" ML model failed to load. Please check model files.")
         else:
-            st.error("❌ Failed to load any prediction model")
+            st.error(" Failed to load any prediction model")
             return
     
     # Sidebar for inputs
